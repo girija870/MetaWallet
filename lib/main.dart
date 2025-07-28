@@ -45,11 +45,14 @@ class _WalletHomePageState extends State<WalletHomePage> {
   @override
   void initState() {
     super.initState();
-    _checkConnection();
     _setupEventListeners();
     // Enable demo mode if MetaMask is not available
     if (!MetaMaskService.isMetaMaskAvailable) {
       isDemoMode = true;
+      // Automatically connect demo wallet
+      _autoConnectDemoWallet();
+    } else {
+      _checkConnection();
     }
   }
 
@@ -65,6 +68,19 @@ class _WalletHomePageState extends State<WalletHomePage> {
         chainId = newChainId;
       });
     });
+  }
+
+  Future<void> _autoConnectDemoWallet() async {
+    try {
+      final account = await DemoService.connectWallet();
+      final chain = await DemoService.getChainId();
+      setState(() {
+        connectedAccount = account;
+        chainId = chain;
+      });
+    } catch (e) {
+      print('Failed to auto-connect demo wallet: $e');
+    }
   }
 
   Future<void> _checkConnection() async {
