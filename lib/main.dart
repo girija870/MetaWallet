@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/metamask_service.dart';
+import 'services/demo_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -35,6 +36,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
   bool isConnecting = false;
   bool isSending = false;
   String? lastTransactionHash;
+  bool isDemoMode = false;
   
   final TextEditingController _toAddressController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
@@ -45,6 +47,10 @@ class _WalletHomePageState extends State<WalletHomePage> {
     super.initState();
     _checkConnection();
     _setupEventListeners();
+    // Enable demo mode if MetaMask is not available
+    if (!MetaMaskService.isMetaMaskAvailable) {
+      isDemoMode = true;
+    }
   }
 
   void _setupEventListeners() {
@@ -62,7 +68,14 @@ class _WalletHomePageState extends State<WalletHomePage> {
   }
 
   Future<void> _checkConnection() async {
-    if (MetaMaskService.isMetaMaskAvailable) {
+    if (isDemoMode) {
+      final account = await DemoService.getCurrentAccount();
+      final chain = await DemoService.getChainId();
+      setState(() {
+        connectedAccount = account;
+        chainId = chain;
+      });
+    } else if (MetaMaskService.isMetaMaskAvailable) {
       final account = await MetaMaskService.getCurrentAccount();
       final chain = await MetaMaskService.getChainId();
       setState(() {
@@ -73,23 +86,31 @@ class _WalletHomePageState extends State<WalletHomePage> {
   }
 
   Future<void> _connectWallet() async {
-    if (!MetaMaskService.isMetaMaskAvailable) {
-      _showSnackBar('MetaMask is not available. Please install MetaMask extension.');
-      return;
-    }
-
     setState(() {
       isConnecting = true;
     });
 
     try {
-      final account = await MetaMaskService.connectWallet();
-      final chain = await MetaMaskService.getChainId();
+      String? account;
+      String? chain;
+      
+      if (isDemoMode) {
+        account = await DemoService.connectWallet();
+        chain = await DemoService.getChainId();
+        _showSnackBar('Demo wallet connected successfully!');
+      } else if (MetaMaskService.isMetaMaskAvailable) {
+        account = await MetaMaskService.connectWallet();
+        chain = await MetaMaskService.getChainId();
+        _showSnackBar('MetaMask wallet connected successfully!');
+      } else {
+        _showSnackBar('MetaMask is not available. Please install MetaMask extension.');
+        return;
+      }
+      
       setState(() {
         connectedAccount = account;
         chainId = chain;
       });
-      _showSnackBar('Wallet connected successfully!');
     } catch (e) {
       _showSnackBar('Failed to connect wallet: $e');
     } finally {
@@ -116,21 +137,31 @@ class _WalletHomePageState extends State<WalletHomePage> {
     });
 
     try {
-      // Convert ETH amount to Wei (multiply by 10^18)
-      final amountInWei = (double.parse(_amountController.text) * 1e18).toInt();
-      final valueHex = '0x${amountInWei.toRadixString(16)}';
+      String txHash;
+      
+      if (isDemoMode) {
+        txHash = await DemoService.sendTransaction(
+          to: _toAddressController.text,
+          value: _amountController.text,
+          data: _dataController.text.isNotEmpty ? _dataController.text : null,
+        );
+        _showSnackBar('Demo transaction sent! Hash: ${txHash.substring(0, 10)}...');
+      } else {
+        // Convert ETH amount to Wei (multiply by 10^18)
+        final amountInWei = (double.parse(_amountController.text) * 1e18).toInt();
+        final valueHex = '0x${amountInWei.toRadixString(16)}';
 
-      final txHash = await MetaMaskService.sendTransaction(
-        to: _toAddressController.text,
-        value: valueHex,
-        data: _dataController.text.isNotEmpty ? _dataController.text : null,
-      );
+        txHash = await MetaMaskService.sendTransaction(
+          to: _toAddressController.text,
+          value: valueHex,
+          data: _dataController.text.isNotEmpty ? _dataController.text : null,
+        );
+        _showSnackBar('Transaction sent! Hash: ${txHash.substring(0, 10)}...');
+      }
 
       setState(() {
         lastTransactionHash = txHash;
       });
-
-      _showSnackBar('Transaction sent! Hash: ${txHash.substring(0, 10)}...');
       
       // Clear form
       _toAddressController.clear();
@@ -179,22 +210,38 @@ class _WalletHomePageState extends State<WalletHomePage> {
                     Row(
                       children: [
                         Icon(
-                          MetaMaskService.isMetaMaskAvailable 
-                            ? Icons.check_circle 
-                            : Icons.error,
-                          color: MetaMaskService.isMetaMaskAvailable 
-                            ? Colors.green 
-                            : Colors.red,
+                          isDemoMode 
+                            ? Icons.science 
+                            : (MetaMaskService.isMetaMaskAvailable 
+                              ? Icons.check_circle 
+                              : Icons.error),
+                          color: isDemoMode 
+                            ? Colors.blue 
+                            : (MetaMaskService.isMetaMaskAvailable 
+                              ? Colors.green 
+                              : Colors.red),
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          MetaMaskService.isMetaMaskAvailable 
-                            ? 'MetaMask Available' 
-                            : 'MetaMask Not Available',
+                          isDemoMode 
+                            ? 'Demo Mode Active' 
+                            : (MetaMaskService.isMetaMaskAvailable 
+                              ? 'MetaMask Available' 
+                              : 'MetaMask Not Available'),
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ],
                     ),
+                    if (isDemoMode) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Running in demo mode for testing purposes',
+                        style: TextStyle(
+                          color: Colors.blue.shade700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                     if (chainId != null) ...[
                       const SizedBox(height: 8),
                       Text('Chain ID: $chainId'),
@@ -246,7 +293,7 @@ class _WalletHomePageState extends State<WalletHomePage> {
                               height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('Connect MetaMask'),
+                          : Text(isDemoMode ? 'Connect Demo Wallet' : 'Connect MetaMask'),
                       ),
                     ],
                   ],
