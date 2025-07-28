@@ -120,6 +120,9 @@ class _WalletHomePageState extends State<WalletHomePage> {
         chain = await DemoService.getChainId();
         _showSnackBar('Demo wallet connected successfully!');
       } else if (MetaMaskService.isMetaMaskAvailable) {
+        // Reset MetaMask service state before attempting connection
+        MetaMaskService.reset();
+        
         // Check if MetaMask is unlocked
         try {
           account = await MetaMaskService.connectWallet();
@@ -143,6 +146,8 @@ class _WalletHomePageState extends State<WalletHomePage> {
             errorMessage = 'Connection timeout. Please check MetaMask and try again.';
           } else if (e.toString().contains('already pending')) {
             errorMessage = 'Connection request already pending. Please check MetaMask.';
+          } else if (e.toString().contains('NoSuchMethodError') || e.toString().contains('then')) {
+            errorMessage = 'MetaMask connection error. Please refresh the page and try again.';
           } else {
             errorMessage = 'Failed to connect to MetaMask: ${e.toString()}';
           }
