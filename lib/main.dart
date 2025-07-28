@@ -37,6 +37,8 @@ class _WalletHomePageState extends State<WalletHomePage> {
   bool isSending = false;
   String? lastTransactionHash;
   bool isDemoMode = false;
+  String? connectionError;
+  int connectionAttempts = 0;
   
   final TextEditingController _toAddressController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
@@ -104,7 +106,10 @@ class _WalletHomePageState extends State<WalletHomePage> {
   Future<void> _connectWallet() async {
     setState(() {
       isConnecting = true;
+      connectionError = null;
     });
+
+    connectionAttempts++;
 
     try {
       String? account;
@@ -115,20 +120,56 @@ class _WalletHomePageState extends State<WalletHomePage> {
         chain = await DemoService.getChainId();
         _showSnackBar('Demo wallet connected successfully!');
       } else if (MetaMaskService.isMetaMaskAvailable) {
-        account = await MetaMaskService.connectWallet();
-        chain = await MetaMaskService.getChainId();
-        _showSnackBar('MetaMask wallet connected successfully!');
+        // Check if MetaMask is unlocked
+        try {
+          account = await MetaMaskService.connectWallet();
+          if (account == null || account.isEmpty) {
+            setState(() {
+              connectionError = 'MetaMask connection was cancelled or no accounts available. Please unlock MetaMask and try again.';
+            });
+            _showSnackBar(connectionError!);
+            return;
+          }
+          chain = await MetaMaskService.getChainId();
+          _showSnackBar('MetaMask wallet connected successfully!');
+          connectionAttempts = 0; // Reset on success
+        } catch (e) {
+          String errorMessage = 'Failed to connect to MetaMask';
+          if (e.toString().contains('User rejected')) {
+            errorMessage = 'Connection request was rejected. Please approve the connection in MetaMask.';
+          } else if (e.toString().contains('unauthorized')) {
+            errorMessage = 'MetaMask is locked. Please unlock MetaMask and try again.';
+          } else if (e.toString().contains('timeout')) {
+            errorMessage = 'Connection timeout. Please check MetaMask and try again.';
+          } else if (e.toString().contains('already pending')) {
+            errorMessage = 'Connection request already pending. Please check MetaMask.';
+          } else {
+            errorMessage = 'Failed to connect to MetaMask: ${e.toString()}';
+          }
+          setState(() {
+            connectionError = errorMessage;
+          });
+          _showSnackBar(errorMessage);
+          return;
+        }
       } else {
-        _showSnackBar('MetaMask is not available. Please install MetaMask extension.');
+        setState(() {
+          connectionError = 'MetaMask is not available. Please install MetaMask extension and refresh the page.';
+        });
+        _showSnackBar(connectionError!);
         return;
       }
       
       setState(() {
         connectedAccount = account;
         chainId = chain;
+        connectionError = null;
       });
     } catch (e) {
-      _showSnackBar('Failed to connect wallet: $e');
+      setState(() {
+        connectionError = 'Unexpected error during wallet connection: ${e.toString()}';
+      });
+      _showSnackBar(connectionError!);
     } finally {
       setState(() {
         isConnecting = false;
@@ -300,17 +341,71 @@ class _WalletHomePageState extends State<WalletHomePage> {
                       ),
                     ] else ...[
                       const Text('No wallet connected'),
+                      if (connectionError != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            border: Border.all(color: Colors.red.shade200),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline, color: Colors.red.shade600, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  connectionError!,
+                                  style: TextStyle(
+                                    color: Colors.red.shade700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: isConnecting ? null : _connectWallet,
-                        child: isConnecting 
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(isDemoMode ? 'Connect Demo Wallet' : 'Connect MetaMask'),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: isConnecting ? null : _connectWallet,
+                              child: isConnecting 
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : Text(isDemoMode ? 'Connect Demo Wallet' : 'Connect MetaMask'),
+                            ),
+                          ),
+                          if (connectionError != null && connectionAttempts > 0) ...[
+                            const SizedBox(width: 8),
+                            TextButton(
+                              onPressed: isConnecting ? null : () {
+                                setState(() {
+                                  connectionError = null;
+                                  connectionAttempts = 0;
+                                });
+                              },
+                              child: const Text('Clear Error'),
+                            ),
+                          ],
+                        ],
                       ),
+                      if (connectionAttempts > 1) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Connection attempts: $connectionAttempts',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ],
                   ],
                 ),
